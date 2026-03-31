@@ -1,61 +1,64 @@
-import os, hashlib, json
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.responses import JSONResponse
+from typing import List, Optional
 from pydantic import BaseModel
-from openai import OpenAI
-from supabase import create_client
 
 app = FastAPI()
 
-# 1. FIX THE CONNECTION (CORS)
-# This allows your HTML file to talk to the Render backend.
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+# Custom Exception for clearer System Observability
+class ResourceNotFoundError(Exception):
+    def __init__(self, resource: str, identifier: str):
+        self.resource = resource
+        self.identifier = identifier
 
-# 2. CLIENTS
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
+@app.exception_handler(ResourceNotFoundError)
+async def resource_not_found_handler(request: Request, exc: ResourceNotFoundError):
+    return JSONResponse(
+        status_code=status.HTTP_404_NOT_FOUND,
+        content={
+            "error": "ERR_RESOURCE_MISSING",
+            "message": f"{exc.resource} with ID '{exc.identifier}' does not exist.",
+            "context": {"id": exc.identifier, "type": exc.resource}
+        },
+    )
 
-class CodeRequest(BaseModel):
-    code: str
+# --- MOCK DATA LAYER ---
+MODELS_DB = {"churn-v1": {"name": "Churn Prediction", "type": "xgboost"}}
 
-@app.post("/explain")
-async def explain_code(req: CodeRequest):
-    # Decision Layer: Hash the code
-    code_hash = hashlib.sha256(req.code.strip().encode()).hexdigest()
+# --- ENDPOINTS ---
 
-    # Cache Check
-    try:
-        cached = supabase.table("code_cache").select("result").eq("id", code_hash).execute()
-        if cached.data:
-            # Match the frontend's expectation: { "source": "cache", "explanation": {...} }
-            return {"source": "cache", "explanation": cached.data[0]["result"]}
-    except: 
-        pass 
+@app.get("/models", response_model=List[dict])
+async def get_models(type: Optional[str] = None):
+    """
+    CRITIQUE FIX: If filter returns nothing, return 200 + []. 
+    NEVER 404 for an empty collection.
+    """
+    results = [m for m in MODELS_DB.values() if not type or m["type"] == type]
+    return results
 
-    # AI Layer: Forced JSON Structure
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": """Return JSON ONLY. 
-                Structure: {
-                  "overview": "brief summary",
-                  "steps": ["step 1", "step 2"],
-                  "time_complexity": "O(log N)", 
-                  "space_complexity": "O(1)",
-                  "suggestions": ["improvement 1"]
-                }"""},
-                {"role": "user", "content": req.code}
-            ],
-            response_format={"type": "json_object"}
-        )
-        
-        ai_json = json.loads(response.choices[0].message.content)
+@app.get("/models/{model_id}")
+async def get_model(model_id: str):
+    """
+    CRITIQUE FIX: 404 only for specific missing IDs.
+    """
+    if model_id not in MODELS_DB:
+        raise ResourceNotFoundError(resource="Model", identifier=model_id)
+    return MODELS_DB[model_id]
 
-        # Store in Supabase
-        supabase.table("code_cache").insert({"id": code_hash, "result": ai_json}).execute()
-
-        return {"source": "ai", "explanation": ai_json}
+@app.post("/predict/{model_id}")
+async def predict(model_id: str, features: dict):
+    """
+    CRITIQUE FIX: Differentiate between missing model (404) 
+    and bad input data (422/400).
+    """
+    if model_id not in MODELS_DB:
+        raise ResourceNotFoundError(resource="Model", identifier=model_id)
     
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    # Check for specific feature logic
+    if "user_id" not in features:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Missing 'user_id' in feature set."
+        )
+    
+    return {"prediction": 0.85, "model": model_id}
