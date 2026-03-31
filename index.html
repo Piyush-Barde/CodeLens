@@ -1214,6 +1214,13 @@
     errorBanner.style.background = 'rgba(129,140,248,0.08)';
     errorBanner.style.borderColor = 'rgba(129,140,248,0.3)';
     errorBanner.style.color = 'var(--accent2)';
+
+    // Add this to your index.html script
+    function copyToClipboard() {
+    const text = document.getElementById('results').innerText;
+    navigator.clipboard.writeText(text);
+    alert('Analysis copied to clipboard!');
+}
   }
 </script>
 </body>
