@@ -1,0 +1,1220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CodeLens — AI Code Explainer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg:        #0a0a0f;
+      --surface:   #12121a;
+      --card:      #1a1a26;
+      --border:    #2a2a3e;
+      --accent:    #6ee7b7;
+      --accent2:   #818cf8;
+      --accent3:   #f472b6;
+      --text:      #e8e8f0;
+      --muted:     #6b7280;
+      --code-bg:   #0d0d16;
+      --danger:    #f87171;
+      --cached:    #fbbf24;
+      --mono:      'Space Mono', monospace;
+      --sans:      'Syne', sans-serif;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Noise texture overlay ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Grid lines ── */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(110,231,183,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(110,231,183,0.03) 1px, transparent 1px);
+      background-size: 60px 60px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Glow blobs ── */
+    .blob {
+      position: fixed;
+      border-radius: 50%;
+      filter: blur(80px);
+      opacity: 0.12;
+      pointer-events: none;
+      z-index: 0;
+      animation: drift 12s ease-in-out infinite alternate;
+    }
+    .blob-1 { width: 500px; height: 500px; background: var(--accent2); top: -100px; left: -100px; }
+    .blob-2 { width: 400px; height: 400px; background: var(--accent);  bottom: -80px; right: -80px; animation-delay: -4s; }
+    .blob-3 { width: 300px; height: 300px; background: var(--accent3); top: 40%; left: 55%; animation-delay: -8s; }
+
+    @keyframes drift {
+      from { transform: translate(0, 0) scale(1); }
+      to   { transform: translate(30px, 20px) scale(1.05); }
+    }
+
+    /* ── Layout ── */
+    .wrap {
+      position: relative;
+      z-index: 1;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 28px 0 24px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--accent2), var(--accent));
+      display: grid;
+      place-items: center;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+
+    .logo-text {
+      font-size: 1.3rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+    .logo-text span { color: var(--accent); }
+
+    .badge {
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      padding: 4px 10px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      letter-spacing: 0.08em;
+    }
+
+    /* ── Hero ── */
+    .hero {
+      text-align: center;
+      padding: 64px 0 48px;
+    }
+
+    .hero-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      letter-spacing: 0.15em;
+      color: var(--accent);
+      background: rgba(110,231,183,0.08);
+      border: 1px solid rgba(110,231,183,0.2);
+      padding: 6px 14px;
+      border-radius: 20px;
+      margin-bottom: 24px;
+    }
+
+    .hero-tag::before {
+      content: '';
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.4; transform: scale(0.8); }
+    }
+
+    .hero h1 {
+      font-size: clamp(2.4rem, 5vw, 4rem);
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      line-height: 1.1;
+      margin-bottom: 18px;
+    }
+
+    .hero h1 em {
+      font-style: normal;
+      background: linear-gradient(90deg, var(--accent2), var(--accent), var(--accent3));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero p {
+      font-size: 1.05rem;
+      color: var(--muted);
+      max-width: 520px;
+      margin: 0 auto;
+      line-height: 1.7;
+    }
+
+    /* ── Main card ── */
+    .main-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      overflow: hidden;
+      margin-bottom: 32px;
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.03), 0 40px 80px rgba(0,0,0,0.4);
+    }
+
+    /* ── Editor toolbar ── */
+    .editor-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 20px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .editor-bar-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .dots { display: flex; gap: 6px; }
+    .dot  { width: 10px; height: 10px; border-radius: 50%; }
+    .dot-r { background: #ff5f57; }
+    .dot-y { background: #febc2e; }
+    .dot-g { background: #28c840; }
+
+    .editor-label {
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      color: var(--muted);
+      letter-spacing: 0.05em;
+    }
+
+    .lang-select {
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      background: var(--card);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 10px;
+      cursor: pointer;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .lang-select:focus { border-color: var(--accent); }
+
+    /* ── Code textarea ── */
+    .code-area-wrap {
+      position: relative;
+    }
+
+    .line-numbers {
+      position: absolute;
+      top: 0; left: 0;
+      width: 48px;
+      height: 100%;
+      background: rgba(0,0,0,0.15);
+      border-right: 1px solid var(--border);
+      padding: 20px 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      pointer-events: none;
+      overflow: hidden;
+    }
+
+    .line-num {
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      color: var(--border);
+      line-height: 1.6rem;
+      width: 100%;
+      text-align: center;
+    }
+
+    #code-input {
+      width: 100%;
+      min-height: 280px;
+      padding: 20px 20px 20px 64px;
+      background: var(--code-bg);
+      color: var(--accent);
+      font-family: var(--mono);
+      font-size: 0.85rem;
+      line-height: 1.6rem;
+      border: none;
+      outline: none;
+      resize: vertical;
+      tab-size: 2;
+      caret-color: var(--accent);
+    }
+
+    #code-input::placeholder {
+      color: #2a2a3e;
+    }
+
+    /* ── Action bar ── */
+    .action-bar {
+      padding: 16px 20px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .char-count {
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      color: var(--muted);
+    }
+
+    .action-right { display: flex; gap: 10px; align-items: center; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 22px;
+      border-radius: 10px;
+      font-family: var(--sans);
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s;
+      letter-spacing: 0.01em;
+    }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    .btn-ghost:hover { color: var(--text); border-color: var(--muted); }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent2), var(--accent));
+      color: #0a0a0f;
+      font-weight: 700;
+      box-shadow: 0 0 24px rgba(110,231,183,0.2);
+    }
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 0 36px rgba(110,231,183,0.35);
+    }
+    .btn-primary:active { transform: translateY(0); }
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    /* ── Loading state ── */
+    .loader {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      color: var(--accent);
+    }
+
+    .loader.active { display: flex; }
+
+    .spinner {
+      width: 16px; height: 16px;
+      border: 2px solid rgba(110,231,183,0.2);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Error banner ── */
+    .error-banner {
+      display: none;
+      margin: 0 0 20px;
+      padding: 14px 18px;
+      background: rgba(248,113,113,0.08);
+      border: 1px solid rgba(248,113,113,0.3);
+      border-radius: 12px;
+      font-size: 0.85rem;
+      color: var(--danger);
+      align-items: center;
+      gap: 10px;
+    }
+    .error-banner.active { display: flex; }
+
+    /* ── Results ── */
+    #results { display: none; }
+    #results.active { display: block; }
+
+    .result-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .result-title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .source-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      letter-spacing: 0.08em;
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-weight: 700;
+    }
+
+    .source-badge.ai {
+      background: rgba(129,140,248,0.1);
+      border: 1px solid rgba(129,140,248,0.3);
+      color: var(--accent2);
+    }
+
+    .source-badge.cached {
+      background: rgba(251,191,36,0.1);
+      border: 1px solid rgba(251,191,36,0.3);
+      color: var(--cached);
+    }
+
+    .source-badge::before {
+      content: '';
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    /* ── Result sections grid ── */
+    .results-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    @media (max-width: 700px) {
+      .results-grid { grid-template-columns: 1fr; }
+    }
+
+    .result-section {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+      animation: fadeSlideUp 0.4s ease both;
+    }
+
+    .result-section.full { grid-column: 1 / -1; }
+
+    @keyframes fadeSlideUp {
+      from { opacity: 0; transform: translateY(16px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .result-section:nth-child(1) { animation-delay: 0.05s; }
+    .result-section:nth-child(2) { animation-delay: 0.1s; }
+    .result-section:nth-child(3) { animation-delay: 0.15s; }
+    .result-section:nth-child(4) { animation-delay: 0.2s; }
+
+    .section-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 18px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .section-icon {
+      width: 28px; height: 28px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+
+    .icon-blue  { background: rgba(129,140,248,0.15); }
+    .icon-green { background: rgba(110,231,183,0.15); }
+    .icon-pink  { background: rgba(244,114,182,0.15); }
+    .icon-amber { background: rgba(251,191,36,0.15); }
+
+    .section-title {
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .section-body {
+      padding: 18px;
+      font-size: 0.88rem;
+      line-height: 1.75;
+      color: var(--text);
+    }
+
+    /* ── Overview ── */
+    .overview-text { color: var(--text); }
+
+    /* ── Step list ── */
+    .step-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .step-item {
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+    }
+
+    .step-num {
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: var(--accent2);
+      background: rgba(129,140,248,0.1);
+      border: 1px solid rgba(129,140,248,0.25);
+      border-radius: 6px;
+      min-width: 26px;
+      height: 26px;
+      display: grid;
+      place-items: center;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .step-text { line-height: 1.65; }
+
+    /* ── Complexity pill ── */
+    .complexity-display {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .complexity-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .complexity-label {
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      color: var(--muted);
+      min-width: 60px;
+    }
+
+    .complexity-pill {
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      font-weight: 700;
+      padding: 5px 14px;
+      border-radius: 20px;
+    }
+
+    .pill-green  { background: rgba(110,231,183,0.12); color: var(--accent);  border: 1px solid rgba(110,231,183,0.25); }
+    .pill-yellow { background: rgba(251,191,36,0.12);  color: var(--cached);  border: 1px solid rgba(251,191,36,0.25); }
+    .pill-red    { background: rgba(248,113,113,0.12); color: var(--danger);  border: 1px solid rgba(248,113,113,0.25); }
+    .pill-blue   { background: rgba(129,140,248,0.12); color: var(--accent2); border: 1px solid rgba(129,140,248,0.25); }
+
+    .complexity-bar-wrap {
+      flex: 1;
+      height: 4px;
+      background: var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .complexity-bar {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.6s ease;
+    }
+
+    /* ── Suggestions ── */
+    .suggestion-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .suggestion-item {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      padding: 10px 14px;
+      background: rgba(244,114,182,0.05);
+      border: 1px solid rgba(244,114,182,0.12);
+      border-radius: 10px;
+      font-size: 0.84rem;
+      line-height: 1.6;
+    }
+
+    .suggestion-arrow {
+      color: var(--accent3);
+      font-size: 0.9rem;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    /* ── Meta footer ── */
+    .meta-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 16px;
+      padding: 14px 18px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      flex-wrap: wrap;
+      gap: 10px;
+      animation: fadeSlideUp 0.4s 0.25s ease both;
+    }
+
+    .meta-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      color: var(--muted);
+    }
+
+    .meta-item span { color: var(--text); }
+
+    /* ── Features row ── */
+    .features {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-bottom: 48px;
+    }
+
+    @media (max-width: 600px) {
+      .features { grid-template-columns: 1fr; }
+    }
+
+    .feature-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px;
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+    }
+
+    .feature-icon {
+      font-size: 1.4rem;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .feature-card h3 {
+      font-size: 0.88rem;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .feature-card p {
+      font-size: 0.78rem;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    /* ── Footer ── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 24px 0;
+      text-align: center;
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      color: var(--muted);
+      letter-spacing: 0.05em;
+    }
+
+    footer a { color: var(--accent); text-decoration: none; }
+
+    /* ── Tooltip ── */
+    [data-tip] { position: relative; }
+    [data-tip]:hover::after {
+      content: attr(data-tip);
+      position: absolute;
+      bottom: calc(100% + 8px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      padding: 5px 10px;
+      border-radius: 6px;
+      white-space: nowrap;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    /* ── Scroll to top ── */
+    code {
+      font-family: var(--mono);
+      font-size: 0.82em;
+      background: rgba(110,231,183,0.08);
+      border: 1px solid rgba(110,231,183,0.15);
+      padding: 1px 6px;
+      border-radius: 4px;
+      color: var(--accent);
+    }
+  </style>
+</head>
+<body>
+
+<div class="blob blob-1"></div>
+<div class="blob blob-2"></div>
+<div class="blob blob-3"></div>
+
+<div class="wrap">
+
+  <!-- Header -->
+  <header>
+    <div class="logo">
+      <div class="logo-icon">🔍</div>
+      <div class="logo-text">Code<span>Lens</span></div>
+    </div>
+    <div class="badge">AI-POWERED · CLOUD-NATIVE</div>
+  </header>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero-tag">AI Code Explainer</div>
+    <h1>Understand <em>any code</em><br>in seconds</h1>
+    <p>Paste your source code and get a beginner-friendly explanation, complexity analysis, and actionable improvement suggestions — powered by AI.</p>
+  </section>
+
+  <!-- Editor card -->
+  <div class="main-card">
+    <div class="editor-bar">
+      <div class="editor-bar-left">
+        <div class="dots">
+          <div class="dot dot-r"></div>
+          <div class="dot dot-y"></div>
+          <div class="dot dot-g"></div>
+        </div>
+        <span class="editor-label">INPUT CODE</span>
+      </div>
+      <select class="lang-select" id="lang-select" title="Select language">
+        <option value="auto">Auto-detect</option>
+        <option value="python">Python</option>
+        <option value="javascript">JavaScript</option>
+        <option value="typescript">TypeScript</option>
+        <option value="java">Java</option>
+        <option value="cpp">C++</option>
+        <option value="c">C</option>
+        <option value="go">Go</option>
+        <option value="rust">Rust</option>
+        <option value="sql">SQL</option>
+        <option value="bash">Bash</option>
+      </select>
+    </div>
+
+    <div class="code-area-wrap">
+      <div class="line-numbers" id="line-nums"></div>
+      <textarea
+        id="code-input"
+        spellcheck="false"
+        placeholder="# Paste your code here...&#10;# Example:&#10;def binary_search(arr, target):&#10;    left, right = 0, len(arr) - 1&#10;    while left <= right:&#10;        mid = (left + right) // 2&#10;        if arr[mid] == target:&#10;            return mid&#10;        elif arr[mid] < target:&#10;            left = mid + 1&#10;        else:&#10;            right = mid - 1&#10;    return -1"
+      ></textarea>
+    </div>
+
+    <div class="action-bar">
+      <div class="action-left">
+        <span class="char-count" id="char-count">0 characters</span>
+      </div>
+      <div class="action-right">
+        <div class="loader" id="loader">
+          <div class="spinner"></div>
+          <span id="loader-text">Analyzing code...</span>
+        </div>
+        <button class="btn btn-ghost" id="clear-btn" title="Clear editor">✕ Clear</button>
+        <button class="btn btn-primary" id="explain-btn">
+          <span>⚡</span> Explain Code
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Error banner -->
+  <div class="error-banner" id="error-banner">
+    <span>⚠️</span>
+    <span id="error-msg">Something went wrong. Please try again.</span>
+  </div>
+
+  <!-- Results -->
+  <div id="results">
+    <div class="result-header">
+      <div class="result-title">Analysis Results</div>
+      <div class="source-badge ai" id="source-badge">AI-GENERATED</div>
+    </div>
+
+    <div class="results-grid">
+
+      <!-- Overview -->
+      <div class="result-section full" id="sec-overview">
+        <div class="section-head">
+          <div class="section-icon icon-blue">📋</div>
+          <div class="section-title">Code Overview</div>
+        </div>
+        <div class="section-body">
+          <p class="overview-text" id="overview-text"></p>
+        </div>
+      </div>
+
+      <!-- Step-by-step -->
+      <div class="result-section full" id="sec-steps">
+        <div class="section-head">
+          <div class="section-icon icon-green">🔢</div>
+          <div class="section-title">Step-by-Step Explanation</div>
+        </div>
+        <div class="section-body">
+          <ol class="step-list" id="steps-list"></ol>
+        </div>
+      </div>
+
+      <!-- Complexity -->
+      <div class="result-section" id="sec-complexity">
+        <div class="section-head">
+          <div class="section-icon icon-amber">⏱️</div>
+          <div class="section-title">Complexity Analysis</div>
+        </div>
+        <div class="section-body">
+          <div class="complexity-display" id="complexity-display"></div>
+        </div>
+      </div>
+
+      <!-- Improvements -->
+      <div class="result-section" id="sec-improvements">
+        <div class="section-head">
+          <div class="section-icon icon-pink">💡</div>
+          <div class="section-title">Improvement Suggestions</div>
+        </div>
+        <div class="section-body">
+          <ul class="suggestion-list" id="suggestions-list"></ul>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Meta row -->
+    <div class="meta-row" id="meta-row">
+      <div class="meta-item">⏱ Response time: <span id="meta-time">—</span></div>
+      <div class="meta-item">📅 Processed at: <span id="meta-ts">—</span></div>
+      <div class="meta-item">🔤 Language detected: <span id="meta-lang">—</span></div>
+      <div class="meta-item">💾 Cached: <span id="meta-cached">No</span></div>
+    </div>
+  </div>
+
+  <!-- Features -->
+  <div class="features">
+    <div class="feature-card">
+      <div class="feature-icon">🤖</div>
+      <div>
+        <h3>AI-Powered Analysis</h3>
+        <p>Uses OpenAI to generate beginner-friendly, structured code explanations with real understanding.</p>
+      </div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">⚡</div>
+      <div>
+        <h3>Smart Caching</h3>
+        <p>Identical code snippets are fetched instantly from Supabase — no redundant API calls.</p>
+      </div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">☁️</div>
+      <div>
+        <h3>Cloud-Native</h3>
+        <p>Modular FastAPI backend with persistent cloud storage, built for scalability on Render.</p>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <p>CodeLens &nbsp;·&nbsp; FastAPI + Supabase + OpenAI &nbsp;·&nbsp; <a href="#">View on GitHub</a></p>
+  </footer>
+
+</div>
+
+<script>
+  // ── Config ──────────────────────────────────────────────────────────────
+  const API_BASE = 'http://localhost:8000'; // ← change to your deployed backend URL
+
+  // ── Elements ─────────────────────────────────────────────────────────────
+  const codeInput    = document.getElementById('code-input');
+  const explainBtn   = document.getElementById('explain-btn');
+  const clearBtn     = document.getElementById('clear-btn');
+  const charCount    = document.getElementById('char-count');
+  const loader       = document.getElementById('loader');
+  const loaderText   = document.getElementById('loader-text');
+  const errorBanner  = document.getElementById('error-banner');
+  const errorMsg     = document.getElementById('error-msg');
+  const results      = document.getElementById('results');
+  const sourceBadge  = document.getElementById('source-badge');
+  const langSelect   = document.getElementById('lang-select');
+  const lineNums     = document.getElementById('line-nums');
+
+  // ── Line numbers ─────────────────────────────────────────────────────────
+  function updateLineNums() {
+    const lines = codeInput.value.split('\n').length;
+    lineNums.innerHTML = Array.from({ length: lines }, (_, i) =>
+      `<div class="line-num">${i + 1}</div>`
+    ).join('');
+  }
+
+  codeInput.addEventListener('input', () => {
+    const len = codeInput.value.length;
+    charCount.textContent = `${len.toLocaleString()} character${len !== 1 ? 's' : ''}`;
+    updateLineNums();
+  });
+
+  codeInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const s = codeInput.selectionStart;
+      const v = codeInput.value;
+      codeInput.value = v.slice(0, s) + '  ' + v.slice(s);
+      codeInput.selectionStart = codeInput.selectionEnd = s + 2;
+    }
+  });
+
+  codeInput.addEventListener('scroll', () => {
+    lineNums.scrollTop = codeInput.scrollTop;
+  });
+
+  updateLineNums();
+
+  // ── Clear ──────────────────────────────────────────────────────────────
+  clearBtn.addEventListener('click', () => {
+    codeInput.value = '';
+    charCount.textContent = '0 characters';
+    updateLineNums();
+    results.classList.remove('active');
+    hideError();
+  });
+
+  // ── Error helpers ─────────────────────────────────────────────────────
+  function showError(msg) {
+    errorMsg.textContent = msg;
+    errorBanner.classList.add('active');
+  }
+  function hideError() {
+    errorBanner.classList.remove('active');
+  }
+
+  // ── Loading helpers ───────────────────────────────────────────────────
+  const loadingMessages = [
+    'Parsing your code...',
+    'Consulting the AI oracle...',
+    'Building explanation...',
+    'Almost there...',
+  ];
+  let loaderInterval = null;
+
+  function startLoader() {
+    loader.classList.add('active');
+    explainBtn.disabled = true;
+    let i = 0;
+    loaderText.textContent = loadingMessages[0];
+    loaderInterval = setInterval(() => {
+      i = (i + 1) % loadingMessages.length;
+      loaderText.textContent = loadingMessages[i];
+    }, 1800);
+  }
+
+  function stopLoader() {
+    loader.classList.remove('active');
+    explainBtn.disabled = false;
+    clearInterval(loaderInterval);
+  }
+
+  // ── Complexity helpers ────────────────────────────────────────────────
+  function complexityClass(notation) {
+    if (!notation) return 'pill-blue';
+    const n = notation.toUpperCase();
+    if (n.includes('O(1)') || n.includes('O(LOG') || n.includes('O(LOG N)')) return 'pill-green';
+    if (n.includes('O(N)') || n.includes('O(N LOG')) return 'pill-yellow';
+    return 'pill-red';
+  }
+
+  function complexityBarWidth(notation) {
+    if (!notation) return 20;
+    const n = notation.toUpperCase();
+    if (n.includes('O(1)'))    return 8;
+    if (n.includes('O(LOG'))   return 20;
+    if (n.includes('O(N LOG')) return 50;
+    if (n.includes('O(N)'))    return 38;
+    if (n.includes('O(N^2)') || n.includes('O(N²)')) return 75;
+    if (n.includes('O(2^N)') || n.includes('O(N!)')) return 95;
+    return 40;
+  }
+
+  function complexityBarColor(notation) {
+    const cls = complexityClass(notation);
+    if (cls === 'pill-green')  return '#6ee7b7';
+    if (cls === 'pill-yellow') return '#fbbf24';
+    return '#f87171';
+  }
+
+  // ── Render results ────────────────────────────────────────────────────
+  function renderResults(data, isCached, elapsed) {
+    const exp = data.explanation || data;
+
+    // Source badge
+    if (isCached) {
+      sourceBadge.textContent = 'CACHED RESULT';
+      sourceBadge.className = 'source-badge cached';
+    } else {
+      sourceBadge.textContent = 'AI-GENERATED';
+      sourceBadge.className = 'source-badge ai';
+    }
+
+    // Overview
+    document.getElementById('overview-text').textContent =
+      exp.overview || exp.code_overview || 'No overview available.';
+
+    // Steps
+    const stepsList = document.getElementById('steps-list');
+    stepsList.innerHTML = '';
+    const steps = exp.steps || exp.step_by_step || exp.explanation_steps || [];
+    if (Array.isArray(steps) && steps.length) {
+      steps.forEach((s, i) => {
+        const li = document.createElement('li');
+        li.className = 'step-item';
+        li.innerHTML = `<div class="step-num">${String(i + 1).padStart(2, '0')}</div><div class="step-text">${s}</div>`;
+        stepsList.appendChild(li);
+      });
+    } else if (typeof steps === 'string') {
+      const li = document.createElement('li');
+      li.className = 'step-item';
+      li.innerHTML = `<div class="step-num">01</div><div class="step-text">${steps}</div>`;
+      stepsList.appendChild(li);
+    } else {
+      stepsList.innerHTML = '<li class="step-item"><div class="step-text" style="color:var(--muted)">No step-by-step breakdown available.</div></li>';
+    }
+
+    // Complexity
+    const complexityDisplay = document.getElementById('complexity-display');
+    complexityDisplay.innerHTML = '';
+    const tc = exp.time_complexity || exp.complexity?.time || null;
+    const sc = exp.space_complexity || exp.complexity?.space || null;
+
+    [[tc, 'Time'], [sc, 'Space']].forEach(([val, label]) => {
+      if (!val) return;
+      const w = complexityBarWidth(val);
+      const color = complexityBarColor(val);
+      const pillCls = complexityClass(val);
+      const div = document.createElement('div');
+      div.className = 'complexity-item';
+      div.innerHTML = `
+        <span class="complexity-label">${label}:</span>
+        <span class="complexity-pill ${pillCls}">${val}</span>
+        <div class="complexity-bar-wrap">
+          <div class="complexity-bar" style="width:${w}%;background:${color}"></div>
+        </div>`;
+      complexityDisplay.appendChild(div);
+    });
+
+    if (!tc && !sc) {
+      complexityDisplay.innerHTML = '<p style="color:var(--muted);font-size:0.82rem">No complexity info available.</p>';
+    }
+
+    // Suggestions
+    const suggList = document.getElementById('suggestions-list');
+    suggList.innerHTML = '';
+    const suggs = exp.suggestions || exp.improvements || exp.improvement_suggestions || [];
+    if (Array.isArray(suggs) && suggs.length) {
+      suggs.forEach(s => {
+        const li = document.createElement('li');
+        li.className = 'suggestion-item';
+        li.innerHTML = `<span class="suggestion-arrow">→</span><span>${s}</span>`;
+        suggList.appendChild(li);
+      });
+    } else if (typeof suggs === 'string') {
+      const li = document.createElement('li');
+      li.className = 'suggestion-item';
+      li.innerHTML = `<span class="suggestion-arrow">→</span><span>${suggs}</span>`;
+      suggList.appendChild(li);
+    } else {
+      suggList.innerHTML = '<li class="suggestion-item" style="color:var(--muted)">No suggestions available.</li>';
+    }
+
+    // Meta
+    document.getElementById('meta-time').textContent = `${elapsed}ms`;
+    document.getElementById('meta-ts').textContent = new Date().toLocaleTimeString();
+    document.getElementById('meta-lang').textContent =
+      data.language || exp.language || langSelect.value || 'Unknown';
+    document.getElementById('meta-cached').textContent = isCached ? 'Yes ⚡' : 'No';
+
+    // Show results
+    results.classList.add('active');
+    results.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  // ── Explain handler ───────────────────────────────────────────────────
+  explainBtn.addEventListener('click', async () => {
+    const code = codeInput.value.trim();
+    if (!code) {
+      showError('Please paste some code before requesting an explanation.');
+      return;
+    }
+    if (code.length < 5) {
+      showError('Code is too short. Please provide at least a few lines.');
+      return;
+    }
+
+    hideError();
+    results.classList.remove('active');
+    startLoader();
+
+    const t0 = performance.now();
+
+    try {
+      const body = { code };
+      const lang = langSelect.value;
+      if (lang !== 'auto') body.language = lang;
+
+      const res = await fetch(`${API_BASE}/explain`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      const elapsed = Math.round(performance.now() - t0);
+
+      if (!res.ok) {
+        let errDetail = `Server responded with status ${res.status}.`;
+        try {
+          const j = await res.json();
+          errDetail = j.detail || j.message || errDetail;
+        } catch (_) {}
+        throw new Error(errDetail);
+      }
+
+      const data = await res.json();
+      const isCached = data.cached === true || data.source === 'cache';
+
+      renderResults(data, isCached, elapsed);
+    } catch (err) {
+      if (err.message.includes('fetch') || err.name === 'TypeError') {
+        // Demo mode: backend not connected
+        showDemoResult();
+      } else {
+        showError(err.message || 'Failed to connect to the backend. Please check your API_BASE URL.');
+      }
+    } finally {
+      stopLoader();
+    }
+  });
+
+  // ── Demo mode (no backend) ────────────────────────────────────────────
+  function showDemoResult() {
+    const mockData = {
+      language: langSelect.value !== 'auto' ? langSelect.value : 'Python',
+      cached: false,
+      explanation: {
+        overview: "This code implements a classic Binary Search algorithm. It efficiently locates a target value within a sorted array by repeatedly halving the search space, making it far faster than a simple linear scan for large datasets.",
+        steps: [
+          "Initialize two pointers — `left` at index 0 and `right` at the last index of the array to define the search window.",
+          "Enter a loop that continues as long as `left` is less than or equal to `right`, meaning the search space is still valid.",
+          "Calculate `mid` as the midpoint of `left` and `right` to split the search space in half each iteration.",
+          "If `arr[mid]` equals the `target`, the element is found — return `mid` as its index.",
+          "If `arr[mid]` is less than `target`, the target must be in the right half — move `left` to `mid + 1`.",
+          "If `arr[mid]` is greater than `target`, the target must be in the left half — move `right` to `mid - 1`.",
+          "If the loop ends without finding the target, return `-1` to signal the element is not in the array."
+        ],
+        time_complexity: "O(log N)",
+        space_complexity: "O(1)",
+        suggestions: [
+          "Add input validation to ensure the array is sorted before running the search — unsorted input will yield incorrect results.",
+          "Consider returning None instead of -1 for a more Pythonic API that callers can test with `if result is not None`.",
+          "Add type hints (`arr: list[int], target: int`) and a docstring to improve readability and editor support.",
+          "For very large arrays, consider a recursive variant only if tail-call optimization is available — the iterative version here is already optimal.",
+        ]
+      }
+    };
+
+    const elapsed = Math.round(200 + Math.random() * 400);
+    renderResults(mockData, false, elapsed);
+
+    // Show a soft notice
+    showError('⚠️ Demo mode: backend not connected. Showing mock data. Update API_BASE in the script to connect your FastAPI server.');
+    errorBanner.style.background = 'rgba(129,140,248,0.08)';
+    errorBanner.style.borderColor = 'rgba(129,140,248,0.3)';
+    errorBanner.style.color = 'var(--accent2)';
+  }
+</script>
+</body>
+</html>
