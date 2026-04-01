@@ -911,7 +911,7 @@
 
 <script>
   // ── Config ──────────────────────────────────────────────────────────────
-  const API_BASE = 'https://codelens-rze6.onrender.com/'; // ← change to your deployed backend URL
+  const API_BASE = 'https://codelens-rze6.onrender.com'; // ← change to your deployed backend URL
 
   // ── Elements ─────────────────────────────────────────────────────────────
   const codeInput    = document.getElementById('code-input');
@@ -1223,6 +1223,14 @@
     alert('Analysis copied to clipboard!');
 }
   }
+
+  // ... other functions ...
+function copyToClipboard() {
+    const text = document.getElementById('results').innerText;
+    navigator.clipboard.writeText(text);
+    alert('Analysis copied to clipboard!');
+}
+</script>
 </script>
 </body>
 </html>
